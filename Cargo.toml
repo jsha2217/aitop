@@ -1,8 +1,15 @@
 [package]
 name = "aitop"
-version = "0.1.0"
+version = "0.2.0-alpha.5"
 edition = "2021"
-description = "Real-time AI Token & Cost Monitor for Claude Code, Codex, and Antigravity"
+authors = ["windr <https://github.com/jsha2217>"]
+description = "A terminal dashboard for AI coding quotas and local token history"
+repository = "https://github.com/jsha2217/aitop"
+homepage = "https://github.com/jsha2217/aitop"
+license = "MIT"
+readme = "README.md"
+keywords = ["tui", "ai", "claude", "codex", "monitor"]
+categories = ["command-line-utilities", "development-tools"]
 
 [dependencies]
 ratatui = "0.29"
@@ -13,3 +20,10 @@ walkdir = "2.5"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 dirs = "5.0"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+sha2 = "0.10"
+signal-hook = "0.3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

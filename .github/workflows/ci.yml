@@ -1,0 +1,26 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - run: ./target/release/aitop demo --json
+      - run: python3 scripts/check_terminal.py ./target/release/aitop
+      - run: python3 scripts/check_terminal.py ./target/release/aitop --details
+      - run: python3 scripts/check_terminal.py ./target/release/aitop --manual-refresh
+      - run: NO_COLOR=1 python3 scripts/check_terminal.py ./target/release/aitop --color-check

@@ -1,0 +1,156 @@
+<div id="aitop-design-preview" aria-label="aitop 공통 화면 설정">
+  <div class="viz-carousel" aria-label="aitop 화면 구성 비교" data-previous-label="이전" data-next-label="다음">
+    <section data-variant="Focus" aria-label="Focus 화면">
+      <div class="at-window" data-design="focus" aria-label="Focus 디자인 설정"></div>
+    </section>
+    <section data-variant="Compact" aria-label="Compact 화면" hidden>
+      <div class="at-window at-compact" data-design="compact" aria-label="Compact 디자인 설정"></div>
+    </section>
+  </div>
+</div>
+<style>
+  #aitop-design-preview { width:100%; }
+  #aitop-design-preview .at-window {
+    --at-bg:light-dark(#f8faf8,#111613);
+    --at-surface:light-dark(#eef2ef,#19201b);
+    --at-fg:light-dark(#1d2921,#e8eee9);
+    --at-muted:light-dark(#526258,#a3afa6);
+    --at-line:light-dark(#cbd5cd,#344037);
+    --at-accent:light-dark(#166b47,#8ad5ac);
+    --at-warn:light-dark(#865a0b,#eac576);
+    --at-low:light-dark(#a03f32,#ee9b8e);
+    --at-space:18px;
+    color:var(--at-fg); background:var(--at-bg); border:1px solid var(--at-line);
+    font-family:ui-monospace,"SFMono-Regular",Consolas,monospace;
+    font-size:13px; line-height:1.6; min-height:620px; box-sizing:border-box;
+  }
+  #aitop-design-preview .at-window * { box-sizing:border-box; }
+  #aitop-design-preview .at-window [hidden] { display:none !important; }
+  #aitop-design-preview .at-chrome { display:flex; align-items:center; gap:12px; padding:16px 110px 16px 20px; border-bottom:1px solid var(--at-line); flex-wrap:wrap; }
+  #aitop-design-preview .at-wordmark { font-size:19px; font-weight:500; letter-spacing:-.5px; }
+  #aitop-design-preview .at-glyph { color:var(--at-accent); letter-spacing:-3px; padding-right:5px; }
+  #aitop-design-preview .at-dim { color:var(--at-muted); }
+  #aitop-design-preview .at-demo { color:var(--at-muted); font-size:12px; }
+  #aitop-design-preview .at-nav { display:flex; gap:4px; padding:0 16px; border-bottom:1px solid var(--at-line); flex-wrap:wrap; }
+  #aitop-design-preview button { font:inherit; color:inherit; }
+  #aitop-design-preview .at-tab { background:transparent; border:0; border-bottom:2px solid transparent; padding:12px 10px; color:var(--at-muted); }
+  #aitop-design-preview .at-tab[aria-selected="true"] { color:var(--at-fg); border-bottom-color:var(--at-accent); }
+  #aitop-design-preview .at-content { padding:var(--at-space); }
+  #aitop-design-preview .at-section-label { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:16px; font-size:12px; color:var(--at-muted); }
+  #aitop-design-preview .at-layout { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(230px,1fr); gap:24px; }
+  #aitop-design-preview .at-providers { display:grid; align-content:start; gap:8px; }
+  #aitop-design-preview .at-provider { text-align:left; width:100%; background:transparent; border:0; border-left:2px solid transparent; padding:12px; }
+  #aitop-design-preview .at-provider[aria-pressed="true"] { background:var(--at-surface); border-left-color:var(--at-accent); }
+  #aitop-design-preview .at-provider-name { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; font-weight:500; }
+  #aitop-design-preview .at-status { color:var(--at-muted); font-size:12px; font-weight:400; }
+  #aitop-design-preview .at-quota { display:grid; grid-template-columns:30px minmax(20px,1fr) 85px; gap:10px; align-items:center; margin-top:10px; }
+  #aitop-design-preview .at-track { height:6px; background:var(--at-line); overflow:hidden; }
+  #aitop-design-preview .at-fill { height:100%; background:var(--at-accent); width:var(--at-value); }
+  #aitop-design-preview .at-fill[data-level="warn"] { background:var(--at-warn); }
+  #aitop-design-preview .at-fill[data-level="low"] { background:var(--at-low); }
+  #aitop-design-preview .at-number { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  #aitop-design-preview .at-source { margin-top:10px; color:var(--at-muted); font-size:12px; overflow-wrap:anywhere; }
+  #aitop-design-preview .at-detail { padding-left:20px; border-left:1px solid var(--at-line); min-width:0; }
+  #aitop-design-preview .at-detail-title { font-weight:500; margin-bottom:18px; }
+  #aitop-design-preview .at-facts { margin:0; display:grid; gap:12px; }
+  #aitop-design-preview .at-fact { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  #aitop-design-preview dt { color:var(--at-muted); }
+  #aitop-design-preview dd { margin:0; font-variant-numeric:tabular-nums; }
+  #aitop-design-preview .at-note { color:var(--at-muted); margin:20px 0 0; font-size:12px; overflow-wrap:anywhere; }
+  #aitop-design-preview .at-today { display:flex; gap:20px; flex-wrap:wrap; border-top:1px solid var(--at-line); margin-top:22px; padding-top:16px; }
+  #aitop-design-preview .at-foot { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; padding:12px 20px; border-top:1px solid var(--at-line); color:var(--at-muted); font-size:12px; }
+  #aitop-design-preview .at-compact .at-layout { display:block; }
+  #aitop-design-preview .at-compact .at-providers { gap:0; }
+  #aitop-design-preview .at-compact .at-provider { padding:10px 12px; }
+  #aitop-design-preview .at-compact .at-quota { grid-template-columns:30px minmax(20px,1fr) 85px; margin-top:6px; }
+  #aitop-design-preview .at-compact .at-provider-name { display:inline-flex; margin-right:16px; }
+  #aitop-design-preview .at-compact .at-source { display:none; }
+  #aitop-design-preview .at-compact .at-detail { border:0; border-top:1px solid var(--at-line); padding:14px 0 0; margin-top:16px; }
+  #aitop-design-preview .at-compact .at-detail-title { margin-bottom:10px; }
+  #aitop-design-preview .at-compact .at-facts { grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px 24px; }
+  #aitop-design-preview .at-compact .at-note { margin-top:10px; }
+  #aitop-design-preview .at-history { display:grid; gap:16px; }
+  #aitop-design-preview .at-history-row { display:grid; grid-template-columns:minmax(100px,1fr) minmax(50px,1.5fr) 85px; gap:16px; align-items:center; }
+  #aitop-design-preview .at-history-head { display:flex; gap:20px; flex-wrap:wrap; padding-bottom:18px; border-bottom:1px solid var(--at-line); }
+  #aitop-design-preview .at-subtitle { font-size:12px; color:var(--at-muted); margin-bottom:8px; }
+  #aitop-design-preview .at-capability { padding:14px 0; border-bottom:1px solid var(--at-line); display:grid; gap:4px; }
+  #aitop-design-preview .at-capability:last-child { border:0; }
+  @media(max-width:650px) {
+    #aitop-design-preview .at-window { min-height:800px; }
+    #aitop-design-preview .at-layout { grid-template-columns:1fr; gap:18px; }
+    #aitop-design-preview .at-detail { border-left:0; border-top:1px solid var(--at-line); padding:16px 0 0; }
+    #aitop-design-preview .at-compact .at-facts { grid-template-columns:1fr; }
+    #aitop-design-preview .at-content { padding:14px; }
+    #aitop-design-preview .at-history-row { grid-template-columns:90px minmax(30px,1fr) 70px; gap:8px; }
+    #aitop-design-preview .at-chrome { padding-left:16px; gap:6px 12px; }
+    #aitop-design-preview .at-demo { width:100%; }
+  }
+  @media(pointer:coarse) { #aitop-design-preview .at-tab { min-height:44px; } }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('aitop-design-preview');
+  const providerData = [
+    {id:'claude', name:'Claude Code', short:64, week:28, source:'Statusline', age:'18s ago', reset:'2h 14m', weeklyReset:'4d 06h', tokens:'742K', cost:'$3.16', state:'Observed'},
+    {id:'codex', name:'Codex', short:81, week:57, source:'App Server', age:'6s ago', reset:'3h 02m', weeklyReset:'5d 12h', tokens:'498K', cost:'$1.66', state:'Observed'},
+    {id:'cursor', name:'Cursor', source:'Unavailable', state:'Sign-in required'}
+  ];
+  const saved = window.openai?.widgetState?.modelContent;
+  const selected = ['claude','codex','cursor'].includes(saved?.provider) ? saved.provider : 'claude';
+  const views = ['overview','history','providers'];
+  const options = {mode:'Remaining', details:true};
+  const states = [];
+  function remember(state) {
+    window.openai?.setWidgetState?.({modelContent:{view:state.view,provider:state.provider},privateContent:null}).catch(() => {});
+  }
+  function bar(label, remaining) {
+    const value = options.mode === 'Remaining' ? remaining : 100 - remaining;
+    const level = remaining <= 15 ? 'low' : remaining <= 40 ? 'warn' : 'ok';
+    return `<div class="at-quota"><span class="at-dim">${label}</span><div class="at-track" role="progressbar" aria-label="${label} ${options.mode.toLowerCase()}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${value}"><div class="at-fill" data-level="${level}" style="--at-value:${value}%"></div></div><span class="at-number">${value}% <span class="at-dim">${options.mode === 'Remaining' ? 'left' : 'used'}</span></span></div>`;
+  }
+  function detail(p) {
+    if(p.id === 'cursor') return `<div class="at-detail-title">Cursor / Connection</div><dl class="at-facts"><div class="at-fact"><dt>Status</dt><dd>Sign-in required</dd></div><div class="at-fact"><dt>Quota</dt><dd>—</dd></div></dl><p class="at-note">Usage is unavailable.<br>Run aitop doctor for connection details.</p>`;
+    return `<div class="at-detail-title">${p.name} / Details</div><dl class="at-facts"><div class="at-fact"><dt>5h reset</dt><dd>${p.reset}</dd></div><div class="at-fact"><dt>7d reset</dt><dd>${p.weeklyReset}</dd></div><div class="at-fact"><dt>Source</dt><dd>${p.source}</dd></div><div class="at-fact"><dt>Observed</dt><dd>${p.age}</dd></div><div class="at-fact"><dt>Tokens today</dt><dd>${p.tokens}</dd></div><div class="at-fact"><dt>API estimate</dt><dd>${p.cost}</dd></div></dl><p class="at-note">Tokens cover local history only.<br>API estimates are separate from your subscription bill.</p>`;
+  }
+  function overview(state) {
+    const p = providerData.find(item => item.id === state.provider);
+    return `<div class="at-section-label"><span>QUOTA / ${options.mode.toUpperCase()}</span><span>2 observed · 1 unavailable</span></div><div class="at-layout"><div class="at-providers" aria-label="Providers">${providerData.map(item => `<button type="button" class="at-provider cursor-interaction" data-provider="${item.id}" aria-pressed="${item.id === p.id}"><span class="at-provider-name">${item.name}<span class="at-status">${item.state}</span></span>${item.id !== 'cursor' ? bar('5h',item.short) + bar('7d',item.week) + `<div class="at-source">${item.source} · ${item.age}</div>` : '<div class="at-source" style="display:block">Quota — · authentication required</div>'}</button>`).join('')}</div><aside class="at-detail" aria-live="polite" ${options.details ? '' : 'hidden'}>${detail(p)}</aside></div><div class="at-today"><span class="at-dim">TODAY · local history</span><span>1.24M tokens</span><span>API estimate $4.82</span></div>`;
+  }
+  function history() {
+    const rows = [['aitop','620K',50],['workspace-api','390K',31.45],['personal-notes','230K',18.55]];
+    return `<div class="at-section-label"><span>HISTORY / TODAY</span><span>By project · local time</span></div><div class="at-history"><div class="at-history-head"><span>1.24M tokens</span><span>API estimate $4.82</span></div><div class="at-subtitle">Observed token usage</div>${rows.map(row=>`<div class="at-history-row"><span>${row[0]}</span><div class="at-track"><div class="at-fill" style="--at-value:${row[2]}%"></div></div><span class="at-number">${row[1]}</span></div>`).join('')}<p class="at-note">Coverage: 2 providers · local history.<br>Other devices are outside this report.</p></div>`;
+  }
+  function providers() {
+    return `<div class="at-section-label"><span>PROVIDERS / CONNECTIONS</span><span>Demo configuration</span></div><div class="at-capability"><span>Claude Code · Connected</span><span class="at-dim">Quota via statusline · tokens via local history</span></div><div class="at-capability"><span>Codex · Connected</span><span class="at-dim">Quota via App Server · tokens via local history</span></div><div class="at-capability"><span>Cursor · Sign-in required</span><span class="at-dim">Quota unavailable · token history unsupported in this demo</span></div><p class="at-note">aitop doctor checks installation, access and compatibility.</p>`;
+  }
+  function render(state) {
+    state.element.innerHTML = `<header class="at-chrome"><span class="at-wordmark"><span class="at-glyph" aria-hidden="true">▂▅▇</span> aitop</span><span class="at-demo">${state.design === 'focus' ? 'Focus' : 'Compact'} · DESIGN CONCEPT · DEMO DATA</span></header><nav class="at-nav" aria-label="${state.design} views" role="tablist">${views.map(view=>`<button type="button" class="at-tab cursor-interaction" role="tab" id="at-${state.design}-${view}" aria-controls="at-${state.design}-panel" aria-selected="${state.view === view}" data-view="${view}">${view[0].toUpperCase()+view.slice(1)}</button>`).join('')}</nav><main id="at-${state.design}-panel" class="at-content" role="tabpanel" aria-labelledby="at-${state.design}-${state.view}">${state.view === 'overview' ? overview(state) : state.view === 'history' ? history() : providers()}</main><footer class="at-foot"><span>[Tab] View · [↑↓] Select · [Enter] Details</span><span>Local / read only</span></footer>`;
+    state.element.style.setProperty('--at-space',state.spacing+'px');
+  }
+  root.querySelectorAll('[data-design]').forEach(element => {
+    const state = {element,design:element.dataset.design,view:views.includes(saved?.view) ? saved.view : 'overview',provider:selected,spacing:18};
+    states.push(state);
+    render(state);
+    element.addEventListener('click',event => {
+      const tab = event.target.closest('[data-view]');
+      const row = event.target.closest('[data-provider]');
+      if(tab) { state.view=tab.dataset.view; render(state); remember(state); element.querySelector(`[data-view="${state.view}"]`).focus(); }
+      if(row) { state.provider=row.dataset.provider; render(state); remember(state); element.querySelector(`[data-provider="${state.provider}"]`).focus(); }
+    });
+    if(globalThis.Tweak) {
+      const tweak = new Tweak({container:element,onChange:()=>render(state)});
+      tweak.addSlider(state,'spacing',{label:'화면 여백',min:12,max:28,step:2,unit:'px'});
+    }
+  });
+  if(globalThis.Tweak) {
+    const tweak = new Tweak({container:root,onChange:()=>states.forEach(render)});
+    tweak.addSelect(options,'mode',{label:'게이지 기준',options:['Remaining','Used']});
+    tweak.addToggle(options,'details',{label:'상세 영역 표시'});
+  }
+  window.addEventListener('openai:set_globals',event => {
+    const next = event.detail?.globals?.widgetState?.modelContent;
+    if(!next) return;
+    states.forEach(state=>{ if(views.includes(next.view)) state.view=next.view; if(providerData.some(p=>p.id===next.provider)) state.provider=next.provider; render(state); });
+  });
+})();
+</script>

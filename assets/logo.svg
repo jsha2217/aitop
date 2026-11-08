@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="72" viewBox="0 0 220 72" role="img" aria-labelledby="title">
+  <title id="title">aitop — terminal usage monitor</title>
+  <style>
+    .word {fill:#1d2921} .mark {fill:#166b47}
+    @media(prefers-color-scheme:dark){.word{fill:#e8eee9}.mark{fill:#8ad5ac}}
+  </style>
+  <g class="mark"><rect x="12" y="40" width="9" height="12"/><rect x="27" y="29" width="9" height="23"/><rect x="42" y="18" width="9" height="34"/></g>
+  <text x="68" y="51" class="word" font-family="Menlo,Consolas,monospace" font-size="38" letter-spacing="-2">aitop</text>
+</svg>

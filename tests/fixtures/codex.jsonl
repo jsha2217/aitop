@@ -1,0 +1,5 @@
+{"type":"session_meta","payload":{"id":"test-session","cwd":"/private/work/aitop"}}
+{"type":"turn_context","payload":{"model":"test-model"}}
+{"type":"event_msg","timestamp":"2026-11-08T07:00:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":100,"cached_input_tokens":200}},"rate_limits":{"primary":{"used_percent":25,"resets_at":1794150000,"window_minutes":300},"secondary":null}}}
+{"type":"event_msg","timestamp":"2026-11-08T07:01:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"output_tokens":100,"cached_input_tokens":200}}}}
+{"type":"event_msg","timestamp":"2026-11-08T07:02:00Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":2000,"output_tokens":250,"cached_input_tokens":500}}}}

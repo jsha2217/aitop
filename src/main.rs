@@ -1,457 +1,468 @@
-mod models;
-mod parser;
-mod ui;
-
-use std::error::Error;
-use std::fs;
-use std::io::{self, stdout};
-use std::path::PathBuf;
-use std::sync::mpsc::{self, Sender};
-use std::thread;
-use std::time::{Duration, Instant};
-
-use chrono::Local;
-use clap::Parser;
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    terminal::{
-        disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen, SetTitle,
-    },
+use aitop::{
+    config::{Config, Paths},
+    history::{Pricing, Store},
+    models::{Availability, BarMode, GroupBy, Period, Provider, Result},
+    output,
+    parser::{self, FetchOptions},
+    runtime, ui,
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
-use models::{format_number, AgentSummary, AllUsageStats, AppConfig, BarMode};
+use clap::{Parser, Subcommand};
+use std::{
+    io::{self, IsTerminal, Read},
+    path::PathBuf,
+    process::ExitCode,
+    sync::{atomic::AtomicBool, Arc},
+};
 
-#[derive(Parser, Debug)]
+#[derive(Debug, Parser)]
 #[command(
-    name = "aitop",
-    author = "windr",
-    version = "0.1.0",
-    about = "⚡ Real-time Token & Cost Monitor for AI Coding Agents"
+    version,
+    about = "AI coding quotas and local token history in your terminal"
 )]
 struct Args {
-    /// Refresh interval in seconds (overrides saved setting)
-    #[arg(short, long)]
+    /// User home to inspect (useful for fixtures and portable installations)
+    #[arg(long, global = true)]
+    home: Option<PathBuf>,
+    /// aitop-owned cache directory
+    #[arg(long, global = true)]
+    data_dir: Option<PathBuf>,
+    /// Refresh seconds; saves to configuration as in aitop 0.1
+    #[arg(short, long, global = true)]
     interval: Option<u64>,
-
-    /// Print current statistics once and exit (no interactive TUI)
-    #[arg(long)]
+    /// Print once without entering the TUI
+    #[arg(long, global = true)]
     once: bool,
+    /// Structured output, schema version 1
+    #[arg(long, global = true)]
+    json: bool,
+    /// Read local history and stored quota snapshots without vendor requests
+    #[arg(long, global = true)]
+    offline: bool,
+    /// Allow Claude macOS Keychain access and remember the permission
+    #[arg(long, global = true)]
+    keychain: bool,
+    /// Use the Codex App Server instead of its default API source
+    #[arg(long, global = true)]
+    cli: bool,
+    /// Compatibility flag; enabled AGY providers now query automatically
+    #[arg(long, global = true)]
+    agy_cli: bool,
+    /// ASCII-only TUI symbols
+    #[arg(long, global = true)]
+    ascii: bool,
+    /// Disable TUI colors (also honors NO_COLOR)
+    #[arg(long, global = true)]
+    no_color: bool,
+    /// Force TUI colors for this run, overriding NO_COLOR and the saved preference
+    #[arg(long, global = true, conflicts_with = "no_color")]
+    color: bool,
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Print quotas and today's local summary
+    Status {
+        #[arg(long)]
+        provider: Option<Provider>,
+    },
+    /// Show local usage by period and grouping
+    History {
+        #[arg(long, value_enum, default_value = "today")]
+        period: Period,
+        #[arg(long, value_enum, default_value = "project")]
+        group_by: GroupBy,
+        #[arg(long)]
+        provider: Option<Provider>,
+    },
+    /// List available sources and their limitations
+    Providers,
+    /// Diagnose configuration and local source availability
+    Doctor {
+        #[arg(long)]
+        network: bool,
+    },
+    /// Inspect configuration or change a setting
+    Config {
+        #[command(subcommand)]
+        action: Option<ConfigCommand>,
+    },
+    /// Explore synthetic data; never reads credentials or writes configuration
+    Demo,
+    /// Capture Claude statusline JSON from stdin, without changing Claude settings
+    Ingest {
+        #[arg(value_enum)]
+        provider: Provider,
+    },
+    /// A cached, short summary for tmux (no scanning or vendor requests)
+    Statusline {
+        #[arg(long)]
+        cached: bool,
+    },
+}
+#[derive(Debug, Subcommand)]
+enum ConfigCommand {
+    Set { key: String, value: String },
 }
 
-fn config_file_path(home_dir: &PathBuf) -> PathBuf {
-    home_dir.join(".config").join("aitop").join("config.json")
-}
-
-fn load_config(home_dir: &PathBuf) -> AppConfig {
-    let path = config_file_path(home_dir);
-    if let Ok(content) = fs::read_to_string(&path) {
-        if let Ok(cfg) = serde_json::from_str::<AppConfig>(&content) {
-            if cfg.initialized {
-                return cfg;
-            }
+fn main() -> ExitCode {
+    match execute(Args::parse()) {
+        Ok(code) => ExitCode::from(code),
+        Err(error) => {
+            eprintln!("aitop: {error}");
+            ExitCode::from(2)
         }
     }
-    // First run after install: auto-detect which AI tools have local Auth on this Mac
-    let detected = parser::detect_authenticated_agents(home_dir);
-    save_config(home_dir, &detected);
-    detected
 }
-
-fn save_config(home_dir: &PathBuf, cfg: &AppConfig) {
-    let path = config_file_path(home_dir);
-    if let Some(parent) = path.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if let Ok(json_str) = serde_json::to_string_pretty(cfg) {
-        let _ = fs::write(path, json_str);
-    }
-}
-
-fn main() -> Result<(), Box<dyn Error>> {
-    let args = Args::parse();
-    let home_dir = dirs::home_dir().expect("Unable to find user home directory");
-    let mut cfg = load_config(&home_dir);
-
-    if let Some(secs) = args.interval {
-        cfg.refresh_interval_secs = secs.max(5);
-        save_config(&home_dir, &cfg);
-    }
-
-    // Option 1: One-shot CLI output
-    if args.once {
-        let stats = parser::collect_all_stats(&home_dir, &cfg);
-        println!("============================================================");
-        println!("⚡ aitop - AI Coding Agent Usage Summary");
-        println!("Updated at: {}", stats.last_updated);
-        println!("------------------------------------------------------------");
-        println!("{:<18} | {:<10} | {:<15} | {:<10}", "Agent", "Sessions", "Total Tokens", "Est. Cost");
-        println!("------------------------------------------------------------");
-        let list = [
-            (cfg.show_claude, &stats.claude),
-            (cfg.show_codex, &stats.codex),
-            (cfg.show_agy, &stats.agy),
-            (cfg.show_cursor, &stats.cursor),
-            (cfg.show_copilot, &stats.copilot),
-            (cfg.show_grok, &stats.grok),
-        ];
-        for (enabled, agent) in list {
-            if !enabled {
-                continue;
-            }
-            println!(
-                "{:<18} | {:<10} | {:<15} | ${:<10.4}",
-                agent.name,
-                agent.session_count,
-                format_number(agent.tokens.total_tokens),
-                agent.tokens.estimated_cost_usd
-            );
-            if !agent.usage.session_usage_label.is_empty() {
-                println!("  ├─ {}", agent.usage.session_usage_label);
-            }
-            if !agent.usage.weekly_usage_label.is_empty() {
-                println!("  └─ {}", agent.usage.weekly_usage_label);
-            }
-        }
-        println!("------------------------------------------------------------");
-        println!(
-            "{:<18} | {:<10} | {:<15} | ${:<10.4}",
-            "TOTAL",
-            "-",
-            format_number(stats.total_tokens),
-            stats.total_cost_usd
-        );
-        println!("============================================================");
-        return Ok(());
-    }
-
-    // Option 2: Full interactive TUI
-    enable_raw_mode()?;
-    let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen, SetTitle("aitop"))?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    let res = run_tui(&mut terminal, &home_dir, cfg);
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
-    if let Err(err) = res {
-        eprintln!("Error: {:?}", err);
-    }
-
-    Ok(())
-}
-
-fn spawn_agent_fetch(
-    agent_idx: usize,
-    home_dir: &PathBuf,
-    stats: &mut AllUsageStats,
-    loading_mask: &mut [bool; 6],
-    tx: &Sender<(usize, AgentSummary)>,
-) {
-    if loading_mask[agent_idx] {
-        return;
-    }
-    loading_mask[agent_idx] = true;
-
-    let slot = match agent_idx {
-        0 => &mut stats.claude,
-        1 => &mut stats.codex,
-        2 => &mut stats.agy,
-        3 => &mut stats.cursor,
-        4 => &mut stats.copilot,
-        5 => &mut stats.grok,
-        _ => return,
+fn execute(args: Args) -> Result<u8> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(signal_hook::consts::SIGINT, cancel.clone())?;
+    signal_hook::flag::register(signal_hook::consts::SIGTERM, cancel.clone())?;
+    let home = args
+        .home
+        .clone()
+        .or_else(dirs::home_dir)
+        .ok_or("Cannot locate a home directory; pass --home")?;
+    let paths = Paths::new(home, args.data_dir.clone());
+    let options = FetchOptions {
+        offline: args.offline,
+        // --keychain is persisted below; read the saved setting so it can also be revoked in Settings.
+        keychain: false,
+        cli: args.cli,
+        agy_cli: args.agy_cli,
+        force_refresh: false,
     };
-    if slot.name.is_empty() {
-        *slot = parser::placeholder_agent(agent_idx);
+    let is_demo = matches!(args.command, Some(Command::Demo));
+    // Demo has no dependency on the real user's settings, data or authentication.
+    let mut cfg = if is_demo {
+        Config {
+            show_claude: true,
+            show_codex: true,
+            show_cursor: true,
+            ..Config::default()
+        }
+    } else {
+        paths.load()?
+    };
+    let display = ui::DisplayOptions {
+        ascii: args.ascii,
+        no_color: args.no_color || std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()),
+        color: args.color,
+    };
+    if args.keychain && !is_demo && !cfg.claude_keychain {
+        cfg.claude_keychain = true;
+        paths.save(&cfg)?;
     }
-
-    let home_clone = home_dir.clone();
-    let tx_clone = tx.clone();
-    thread::spawn(move || {
-        let summary = parser::fetch_agent_by_index(&home_clone, agent_idx);
-        let _ = tx_clone.send((agent_idx, summary));
-    });
-}
-
-fn spawn_all_enabled_fetches(
-    cfg: &AppConfig,
-    home_dir: &PathBuf,
-    stats: &mut AllUsageStats,
-    loading_mask: &mut [bool; 6],
-    tx: &Sender<(usize, AgentSummary)>,
-) {
-    let flags = [
-        cfg.show_claude,
-        cfg.show_codex,
-        cfg.show_agy,
-        cfg.show_cursor,
-        cfg.show_copilot,
-        cfg.show_grok,
-    ];
-    for (idx, &enabled) in flags.iter().enumerate() {
-        if enabled {
-            spawn_agent_fetch(idx, home_dir, stats, loading_mask, tx);
+    if let Some(seconds) = args.interval {
+        if seconds > 86400 {
+            return Err("Interval must not exceed 86400 seconds".into());
+        }
+        cfg.refresh_interval_secs = seconds.max(5);
+        if !is_demo {
+            paths.save(&cfg)?;
         }
     }
-}
-
-fn toggle_setting(cfg: &mut AppConfig, cursor: usize, forward: bool) -> Option<usize> {
-    // Returns Some(agent_idx) if an agent was newly enabled and needs background fetch
-    match cursor {
-        0 => {
-            let presets = ui::INTERVAL_PRESETS;
-            let idx = presets
-                .iter()
-                .position(|&p| p >= cfg.refresh_interval_secs)
-                .unwrap_or(3);
-            let new_idx = if forward {
-                (idx + 1).min(presets.len() - 1)
+    match args.command {
+        Some(Command::Demo) => {
+            if args.once || args.json || !io::stdout().is_terminal() || !io::stdin().is_terminal() {
+                print_snapshot(
+                    &runtime::demo(Period::Today, GroupBy::Project),
+                    args.json,
+                    cfg.bar_mode,
+                )?;
             } else {
-                idx.saturating_sub(1)
-            };
-            cfg.refresh_interval_secs = presets[new_idx];
-            None
-        }
-        1 => {
-            cfg.bar_mode = match cfg.bar_mode {
-                BarMode::Remaining => BarMode::Used,
-                BarMode::Used => BarMode::Remaining,
-            };
-            None
-        }
-        2 => {
-            cfg.show_claude = !cfg.show_claude;
-            if cfg.show_claude { Some(0) } else { None }
-        }
-        3 => {
-            cfg.show_codex = !cfg.show_codex;
-            if cfg.show_codex { Some(1) } else { None }
-        }
-        4 => {
-            cfg.show_agy = !cfg.show_agy;
-            if cfg.show_agy { Some(2) } else { None }
-        }
-        5 => {
-            cfg.show_cursor = !cfg.show_cursor;
-            if cfg.show_cursor { Some(3) } else { None }
-        }
-        6 => {
-            cfg.show_copilot = !cfg.show_copilot;
-            if cfg.show_copilot { Some(4) } else { None }
-        }
-        7 => {
-            cfg.show_grok = !cfg.show_grok;
-            if cfg.show_grok { Some(5) } else { None }
-        }
-        _ => None,
-    }
-}
-
-fn run_tui<B: ratatui::backend::Backend>(
-    terminal: &mut Terminal<B>,
-    home_dir: &PathBuf,
-    mut cfg: AppConfig,
-) -> io::Result<()> {
-    let (tx, rx) = mpsc::channel::<(usize, AgentSummary)>();
-    let mut stats = AllUsageStats::default();
-    let mut loading_mask = [false; 6];
-    let mut spinner_tick: usize = 0;
-    let mut last_spinner_step = Instant::now();
-
-    // Start initial fetch asynchronously so TUI opens in 0ms
-    spawn_all_enabled_fetches(&cfg, home_dir, &mut stats, &mut loading_mask, &tx);
-
-    let mut last_refresh = Instant::now();
-    let mut status_msg: Option<String> = None;
-    let mut status_timer: Option<Instant> = None;
-    let mut is_paused = false;
-    let mut show_settings = false;
-    let mut settings_cursor: usize = 0;
-    let mut needs_redraw = true;
-
-    let status_duration = Duration::from_secs(3);
-    let spinner_interval = Duration::from_millis(80);
-
-    loop {
-        let refresh_interval = Duration::from_secs(cfg.refresh_interval_secs.max(1));
-
-        // Receive any completed background agent fetches
-        while let Ok((agent_idx, summary)) = rx.try_recv() {
-            match agent_idx {
-                0 => stats.claude = summary,
-                1 => stats.codex = summary,
-                2 => stats.agy = summary,
-                3 => stats.cursor = summary,
-                4 => stats.copilot = summary,
-                5 => stats.grok = summary,
-                _ => {}
+                ui::run(paths, cfg, options, cancel, true, display)?;
             }
-            loading_mask[agent_idx] = false;
-            stats.last_updated = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-            parser::recompute_totals(&mut stats, &cfg);
-            needs_redraw = true;
+            Ok(0)
         }
-
-        // Clear temporary status message after 3 seconds
-        if let Some(st) = status_timer {
-            if st.elapsed() >= status_duration {
-                status_msg = None;
-                status_timer = None;
-                needs_redraw = true;
-            }
-        }
-
-        // Automatic interval refresh (non-blocking)
-        if !is_paused && last_refresh.elapsed() >= refresh_interval {
-            spawn_all_enabled_fetches(&cfg, home_dir, &mut stats, &mut loading_mask, &tx);
-            last_refresh = Instant::now();
-            needs_redraw = true;
-        }
-
-        let any_loading = loading_mask.iter().any(|&b| b);
-        if any_loading && last_spinner_step.elapsed() >= spinner_interval {
-            spinner_tick = spinner_tick.wrapping_add(1);
-            last_spinner_step = Instant::now();
-            needs_redraw = true;
-        }
-
-        // Only draw when state actually changed, spinner stepped, or terminal resized
-        if needs_redraw {
-            let _ = execute!(io::stdout(), SetTitle("aitop"));
-            terminal.draw(|f| {
-                ui::render_ui(
-                    f,
-                    &stats,
-                    &cfg,
-                    status_msg.as_deref(),
-                    show_settings,
-                    settings_cursor,
-                    &loading_mask,
-                    spinner_tick,
+        Some(Command::Providers) => {
+            let entries=Provider::ALL.map(|p|serde_json::json!({"provider":p,"enabled":cfg.enabled(p),"local_history":p.supports_history(),"quota_source":match p {Provider::Claude=>"statusline capture / experimental OAuth (Keychain opt-in)",Provider::Codex=>"local snapshot / experimental OAuth / opt-in App Server",Provider::Agy=>"experimental opt-in structured CLI; strict schema",Provider::Cursor=>"experimental legacy profile; strict schema",Provider::Copilot=>"experimental internal API; strict schema",Provider::Grok=>"unavailable; never inferred"},"verification":"fixture-tested; live account compatibility not certified"}));
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"schema_version":1,"providers":entries})
+                    )?
                 );
-            })?;
-            needs_redraw = false;
+            } else {
+                for e in entries {
+                    println!(
+                        "{:<10} {}\n  {}",
+                        e["provider"].as_str().unwrap_or(""),
+                        if e["enabled"].as_bool() == Some(true) {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        },
+                        e["quota_source"].as_str().unwrap_or("")
+                    );
+                }
+            }
+            Ok(0)
         }
-
-        // Calculate exact sleep timeout: 80ms while loading spinner is active, otherwise sleep until next refresh
-        let mut wait_timeout = if any_loading {
-            spinner_interval.saturating_sub(last_spinner_step.elapsed())
-        } else if is_paused {
-            Duration::from_secs(3600)
-        } else {
-            refresh_interval.saturating_sub(last_refresh.elapsed())
-        };
-
-        if let Some(st) = status_timer {
-            let rem_status = status_duration.saturating_sub(st.elapsed());
-            wait_timeout = wait_timeout.min(rem_status);
-        }
-
-        if event::poll(wait_timeout)? {
-            match event::read()? {
-                Event::Key(key) => {
-                    if show_settings {
-                        match key.code {
-                            KeyCode::Esc | KeyCode::Char('s') => {
-                                show_settings = false;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                settings_cursor = if settings_cursor == 0 {
-                                    ui::SETTINGS_ROW_COUNT - 1
-                                } else {
-                                    settings_cursor - 1
-                                };
-                                needs_redraw = true;
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                settings_cursor = (settings_cursor + 1) % ui::SETTINGS_ROW_COUNT;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Left | KeyCode::Char('h') => {
-                                let maybe_idx = toggle_setting(&mut cfg, settings_cursor, false);
-                                save_config(home_dir, &cfg);
-                                if let Some(agent_idx) = maybe_idx {
-                                    spawn_agent_fetch(
-                                        agent_idx,
-                                        home_dir,
-                                        &mut stats,
-                                        &mut loading_mask,
-                                        &tx,
-                                    );
-                                } else {
-                                    parser::recompute_totals(&mut stats, &cfg);
-                                }
-                                needs_redraw = true;
-                            }
-                            KeyCode::Right
-                            | KeyCode::Char('l')
-                            | KeyCode::Char(' ')
-                            | KeyCode::Enter => {
-                                let maybe_idx = toggle_setting(&mut cfg, settings_cursor, true);
-                                save_config(home_dir, &cfg);
-                                if let Some(agent_idx) = maybe_idx {
-                                    spawn_agent_fetch(
-                                        agent_idx,
-                                        home_dir,
-                                        &mut stats,
-                                        &mut loading_mask,
-                                        &tx,
-                                    );
-                                } else {
-                                    parser::recompute_totals(&mut stats, &cfg);
-                                }
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char('q') => break,
-                            _ => {}
-                        }
+        Some(Command::Doctor { network }) => {
+            let checks=Provider::ALL.map(|p|{
+                let roots=aitop::history::roots(&paths,p);
+                serde_json::json!({"provider":p,"enabled":cfg.enabled(p),"history_directories_present":roots.iter().filter(|p|p.is_dir()).count(),"history_supported":p.supports_history()})
+            });
+            let prices_ok = Pricing::load(&paths).is_ok();
+            let storage_ok = Store::open(&paths).is_ok();
+            let network_snapshot = network.then(|| {
+                runtime::collect(
+                    &paths,
+                    &cfg,
+                    options,
+                    Period::Today,
+                    GroupBy::Project,
+                    cancel,
+                )
+            });
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"schema_version":1,"config":"valid","pricing_valid":prices_ok,"storage_writable":storage_ok,"network_requested":network && !args.offline,"providers":checks,"network_result":network_snapshot})
+                    )?
+                );
+            } else {
+                println!(
+                    "Config: valid\nPricing: {}\nStorage: {}",
+                    if prices_ok {
+                        "valid (missing rates stay unknown)"
                     } else {
-                        match key.code {
-                            KeyCode::Char('q') | KeyCode::Esc => break,
-                            KeyCode::Char('r') => {
-                                spawn_all_enabled_fetches(
-                                    &cfg,
-                                    home_dir,
-                                    &mut stats,
-                                    &mut loading_mask,
-                                    &tx,
-                                );
-                                last_refresh = Instant::now();
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char('s') => {
-                                show_settings = true;
-                                status_msg = None;
-                                status_timer = None;
-                                needs_redraw = true;
-                            }
-                            KeyCode::Char(' ') => {
-                                is_paused = !is_paused;
-                                status_msg = Some(if is_paused {
-                                    "Auto-refresh PAUSED".to_string()
-                                } else {
-                                    "Auto-refresh RESUMED".to_string()
-                                });
-                                status_timer = Some(Instant::now());
-                                needs_redraw = true;
-                            }
-                            _ => {}
+                        "invalid prices.json"
+                    },
+                    if storage_ok {
+                        "writable"
+                    } else {
+                        "unavailable"
+                    }
+                );
+                for check in checks {
+                    println!(
+                        "{}: {} local history directories; {}",
+                        check["provider"].as_str().unwrap_or(""),
+                        check["history_directories_present"],
+                        if check["enabled"].as_bool() == Some(true) {
+                            "enabled"
+                        } else {
+                            "disabled"
+                        }
+                    );
+                }
+                println!("No credentials displayed. Local diagnostics do not open Keychain or start provider commands.");
+            }
+            if let Some(snapshot) = network_snapshot {
+                if !args.json {
+                    print!("{}", output::status(&snapshot, cfg.bar_mode));
+                }
+                return Ok(u8::from(
+                    output::failed(&snapshot) || !prices_ok || !storage_ok,
+                ));
+            }
+            Ok(u8::from(!prices_ok || !storage_ok))
+        }
+        Some(Command::Config { action }) => {
+            if let Some(ConfigCommand::Set { key, value }) = action {
+                match key.as_str() {
+                    "refresh_interval" => {
+                        cfg.refresh_interval_secs = value
+                            .parse()
+                            .map_err(|_| "refresh_interval must be an integer")?;
+                    }
+                    "bar_mode" => {
+                        cfg.bar_mode = match value.to_lowercase().as_str() {
+                            "remaining" => BarMode::Remaining,
+                            "used" => BarMode::Used,
+                            _ => return Err("bar_mode must be remaining or used".into()),
+                        }
+                    }
+                    "ascii" => {
+                        cfg.ascii = value.parse().map_err(|_| "ascii must be true or false")?
+                    }
+                    "no_color" => {
+                        cfg.no_color = value
+                            .parse()
+                            .map_err(|_| "no_color must be true or false")?
+                    }
+                    "claude_keychain" => {
+                        cfg.claude_keychain = value
+                            .parse()
+                            .map_err(|_| "claude_keychain must be true or false")?;
+                    }
+                    p => {
+                        let provider = Provider::ALL
+                            .into_iter()
+                            .find(|v| v.id() == p)
+                            .ok_or("Unknown configuration key")?;
+                        let enabled: bool = value
+                            .parse()
+                            .map_err(|_| "Provider setting must be true or false")?;
+                        if cfg.enabled(provider) != enabled {
+                            cfg.toggle(provider);
                         }
                     }
                 }
-                Event::Resize(_, _) => {
-                    needs_redraw = true;
+                paths.save(&cfg)?;
+            }
+            println!("{}", serde_json::to_string_pretty(&cfg)?);
+            Ok(0)
+        }
+        Some(Command::Ingest { provider }) => {
+            if provider != Provider::Claude {
+                return Err("Only Claude statusline ingestion is supported".into());
+            }
+            let mut bytes = Vec::new();
+            io::stdin().take(1024 * 1024 + 1).read_to_end(&mut bytes)?;
+            if bytes.len() > 1024 * 1024 {
+                return Err("Statusline input exceeds 1 MiB".into());
+            }
+            let value = serde_json::from_slice(&bytes).map_err(|_| "Invalid statusline JSON")?;
+            let q = parser::claude::statusline(&value, chrono::Local::now().timestamp());
+            if q.availability == Availability::Available {
+                Store::open(&paths)?.save_quota(&q)?;
+                runtime::cache_observation(&paths, q.clone())?;
+            }
+            let text = q
+                .windows
+                .iter()
+                .map(|w| format!("{} {:.0}% left", w.label, 100.0 - w.used_percent))
+                .collect::<Vec<_>>()
+                .join(" | ");
+            println!(
+                "{}",
+                if text.is_empty() {
+                    "Claude limits unavailable"
+                } else {
+                    &text
                 }
-                _ => {}
+            );
+            Ok(0)
+        }
+        Some(Command::Statusline { .. }) => {
+            let now = chrono::Local::now().timestamp();
+            let text = Provider::ALL
+                .into_iter()
+                .filter(|&p| cfg.enabled(p))
+                .filter_map(|p| runtime::cached_quota(&paths, p, options))
+                .map(|q| {
+                    let window = q.windows.first();
+                    match window {
+                        Some(w) if !w.expired(now) => format!(
+                            "{} {:.0}%{}",
+                            q.provider.name(),
+                            100.0 - w.used_percent,
+                            if q.stale(now) || q.refresh_error.is_some() {
+                                " stale"
+                            } else {
+                                ""
+                            }
+                        ),
+                        _ => format!("{} --", q.provider.name()),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
+            println!(
+                "{}",
+                if text.is_empty() {
+                    "aitop: no cached quotas"
+                } else {
+                    &text
+                }
+            );
+            Ok(0)
+        }
+        Some(Command::History {
+            period,
+            group_by,
+            provider,
+        }) => {
+            if let Some(p) = provider {
+                filter(&mut cfg, p);
+            }
+            // History never reads credentials or invokes a provider.
+            let mut store = Store::open(&paths)?;
+            let scan = store.scan(&paths, &cfg, &cancel)?;
+            let pricing = Pricing::load(&paths);
+            let mut report = store.report(
+                &cfg,
+                period,
+                group_by,
+                chrono::Local::now(),
+                pricing.as_ref().unwrap_or(&Pricing::default()),
+            )?;
+            if pricing.is_err() {
+                report
+                    .warnings
+                    .push("Invalid prices.json; costs unavailable".into());
+            }
+            report.partial |= scan.errors > 0 || scan.incomplete_files > 0;
+            if args.json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(
+                        &serde_json::json!({"schema_version":1,"history":report})
+                    )?
+                );
+            } else {
+                print!("{}", output::history(&report));
+            }
+            Ok(u8::from(report.partial || pricing.is_err()))
+        }
+        Some(Command::Status { provider }) => {
+            if let Some(p) = provider {
+                filter(&mut cfg, p);
+            }
+            let snapshot = runtime::collect(
+                &paths,
+                &cfg,
+                options,
+                Period::Today,
+                GroupBy::Project,
+                cancel,
+            );
+            print_snapshot(&snapshot, args.json, cfg.bar_mode)?;
+            Ok(u8::from(output::failed(&snapshot)))
+        }
+        None => {
+            if args.once || args.json || !io::stdout().is_terminal() || !io::stdin().is_terminal() {
+                let snapshot = runtime::collect(
+                    &paths,
+                    &cfg,
+                    options,
+                    Period::Today,
+                    GroupBy::Project,
+                    cancel,
+                );
+                print_snapshot(&snapshot, args.json, cfg.bar_mode)?;
+                Ok(u8::from(output::failed(&snapshot)))
+            } else {
+                ui::run(paths, cfg, options, cancel, false, display)?;
+                Ok(0)
             }
         }
     }
-
+}
+fn filter(cfg: &mut Config, provider: Provider) {
+    for p in Provider::ALL {
+        if cfg.enabled(p) != (p == provider) {
+            cfg.toggle(p);
+        }
+    }
+}
+fn print_snapshot(snapshot: &aitop::models::Snapshot, json: bool, mode: BarMode) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(snapshot)?);
+    } else {
+        print!("{}", output::status(snapshot, mode));
+    }
+    for warning in snapshot
+        .warnings
+        .iter()
+        .chain(snapshot.history.warnings.iter())
+    {
+        eprintln!("aitop: {warning}");
+    }
     Ok(())
 }
